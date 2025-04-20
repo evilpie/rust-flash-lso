@@ -20,26 +20,19 @@ pub(crate) fn parse_string(i: &[u8]) -> AMFResult<'_, &str> {
     take_str(i, length)
 }
 
-fn parse_element_number(i: &[u8]) -> AMFResult<'_, Rc<Value>> {
+fn parse_element_number(i: &[u8]) -> AMFResult<'_, Value> {
     let (i, v) = be_f64(i)?;
-    Ok((i, Rc::new(Value::Number(v))))
+    Ok((i, Value::Number(v)))
 }
 
-fn parse_element_bool(i: &[u8]) -> AMFResult<'_, Rc<Value>> {
+fn parse_element_bool(i: &[u8]) -> AMFResult<'_, Value> {
     let (i, v) = be_u8(i)?;
-    Ok((i, Rc::new(Value::Bool(v > 0))))
+    Ok((i, Value::Bool(v > 0)))
 }
 
-fn parse_element_string(i: &[u8]) -> AMFResult<'_, Rc<Value>> {
+fn parse_element_string(i: &[u8]) -> AMFResult<'_, Value> {
     let (i, v) = parse_string(i)?;
-    Ok((i, Rc::new(Value::String(v.to_string()))))
-}
-
-fn parse_element_date(i: &[u8]) -> AMFResult<'_, Rc<Value>> {
-    let (i, millis) = be_f64(i)?;
-    let (i, time_zone) = be_u16(i)?;
-
-    Ok((i, Rc::new(Value::Date(millis, Some(time_zone)))))
+    Ok((i, Value::String(v.to_string())))
 }
 
 fn parse_long_string_internal(i: &[u8]) -> AMFResult<'_, &str> {
@@ -47,14 +40,14 @@ fn parse_long_string_internal(i: &[u8]) -> AMFResult<'_, &str> {
     map_res(take(length), std::str::from_utf8)(i)
 }
 
-fn parse_element_long_string(i: &[u8]) -> AMFResult<'_, Rc<Value>> {
+fn parse_element_long_string(i: &[u8]) -> AMFResult<'_, Value> {
     let (i, str) = parse_long_string_internal(i)?;
-    Ok((i, Rc::new(Value::String(str.to_string()))))
+    Ok((i, Value::String(str.to_string())))
 }
 
-fn parse_element_xml(i: &[u8]) -> AMFResult<'_, Rc<Value>> {
+fn parse_element_xml(i: &[u8]) -> AMFResult<'_, Value> {
     let (i, content) = parse_long_string_internal(i)?;
-    Ok((i, Rc::new(Value::XML(content.to_string(), true))))
+    Ok((i, Value::XML(content.to_string(), true)))
 }
 
 fn read_type_marker(i: &[u8]) -> AMFResult<'_, TypeMarker> {
@@ -68,63 +61,79 @@ fn read_type_marker(i: &[u8]) -> AMFResult<'_, TypeMarker> {
 /// Handles decoding AMF0
 #[derive(Default)]
 pub struct AMF0Decoder {
-    /// Cache of previously read values, that can be referenced later
-    cache: Vec<Rc<Value>>,
+    current_object_id: i64,
 
     #[cfg(feature = "amf3")]
     amf3_decoder: amf3::read::AMF3Decoder,
 }
 
 impl AMF0Decoder {
-    fn parse_element_reference<'a>(&self, i: &'a [u8]) -> AMFResult<'a, Rc<Value>> {
-        let (i, reference_index) = be_u16(i)?;
-
-        Ok((i, Rc::new(Value::Reference(Reference(reference_index)))))
+    fn next_object_id(&mut self) -> ObjectId {
+        let id = self.current_object_id;
+        self.current_object_id += 1;
+        return ObjectId(id);
     }
 
-    fn parse_element_mixed_array<'a>(&mut self, i: &'a [u8]) -> AMFResult<'a, Rc<Value>> {
+    fn parse_element_reference<'a>(&self, i: &'a [u8]) -> AMFResult<'a, Value> {
+        let (i, reference_index) = be_u16(i)?;
+
+        Ok((i, Value::Reference(Reference(reference_index))))
+    }
+
+    fn parse_element_date<'a>(&mut self, i: &'a [u8]) -> AMFResult<'a, Value> {
+        let object_id = self.next_object_id();
+
+        let (i, millis) = be_f64(i)?;
+        let (i, time_zone) = be_u16(i)?;
+
+        Ok((i, Value::Date(object_id, millis, Some(time_zone))))
+    }
+
+    fn parse_element_mixed_array<'a>(&mut self, i: &'a [u8]) -> AMFResult<'a, Value> {
+        let object_id = self.next_object_id();
         let (i, array_length) = be_u32(i)?;
         map(
             |i| self.parse_array_element(i),
             move |elms: Vec<Element>| {
-                Rc::new(Value::ECMAArray(
-                    ObjectId::INVALID,
+                Value::ECMAArray(
+                    object_id,
                     Vec::new(),
                     elms,
                     array_length,
-                ))
+                )
             },
         )(i)
     }
 
-    fn parse_element_typed_object<'a>(&mut self, i: &'a [u8]) -> AMFResult<'a, Rc<Value>> {
+    fn parse_element_typed_object<'a>(&mut self, i: &'a [u8]) -> AMFResult<'a, Value> {
+        let object_id = self.next_object_id();
         let (i, name) = parse_string(i)?;
-
         map(
             |i| self.parse_array_element(i),
             move |elms: Vec<Element>| {
-                Rc::new(Value::Object(
-                    ObjectId::INVALID,
+                Value::Object(
+                    object_id,
                     elms,
                     Some(ClassDefinition::default_with_name(name.to_string())),
-                ))
+                )
             },
         )(i)
     }
 
-    fn parse_element_object<'a>(&mut self, i: &'a [u8]) -> AMFResult<'a, Rc<Value>> {
+    fn parse_element_object<'a>(&mut self, i: &'a [u8]) -> AMFResult<'a, Value> {
+        let object_id = self.next_object_id();
         let (i, v) = self.parse_array_element(i)?;
-        Ok((i, Rc::new(Value::Object(ObjectId::INVALID, v, None))))
+        Ok((i, Value::Object(object_id, v, None)))
     }
 
     #[cfg(fuzzing)]
     /// For fuzzing
-    pub fn fuzz_parse_element_array<'a>(&mut self, i: &'a [u8]) -> AMFResult<'a, Rc<Value>> {
+    pub fn fuzz_parse_element_array<'a>(&mut self, i: &'a [u8]) -> AMFResult<'a, Value> {
         self.parse_element_array(i)
     }
 
     /// Parse an array of elements
-    fn parse_element_array<'a>(&mut self, i: &'a [u8]) -> AMFResult<'a, Rc<Value>> {
+    fn parse_element_array<'a>(&mut self, i: &'a [u8]) -> AMFResult<'a, Value> {
         let (i, length) = be_u32(i)?;
 
         let length_usize = length
@@ -140,7 +149,7 @@ impl AMF0Decoder {
         let (i, elements) =
             many_m_n(length_usize, length_usize, |i| self.parse_single_element(i))(i)?;
 
-        Ok((i, Rc::new(Value::StrictArray(ObjectId::INVALID, elements))))
+        Ok((i, Value::StrictArray(ObjectId::INVALID, elements)))
     }
 
     fn parse_array_element<'a>(&mut self, i: &'a [u8]) -> AMFResult<'a, Vec<Element>> {
@@ -164,7 +173,7 @@ impl AMF0Decoder {
         Ok((i, out))
     }
 
-    fn parse_element_amf3<'a>(&mut self, i: &'a [u8]) -> AMFResult<'a, Rc<Value>> {
+    fn parse_element_amf3<'a>(&mut self, i: &'a [u8]) -> AMFResult<'a, Value> {
         #[cfg(feature = "amf3")]
         {
             let (i, x) = self.amf3_decoder.parse_single_element(i)?;
@@ -172,52 +181,30 @@ impl AMF0Decoder {
         }
         #[cfg(not(feature = "amf3"))]
         {
-            Ok((i, Rc::new(Value::Unsupported)))
+            Ok((i, Value::Unsupported))
         }
     }
 
     /// Parse a single AMF0 element
-    pub fn parse_single_element<'a>(&mut self, i: &'a [u8]) -> AMFResult<'a, Rc<Value>> {
+    pub fn parse_single_element<'a>(&mut self, i: &'a [u8]) -> AMFResult<'a, Value> {
         // Get the type of the next element
         let (i, type_) = read_type_marker(i)?;
-
-        let cache_idx = self.cache.len();
-        self.cache.push(Rc::new(Value::Undefined));
 
         let (i, v) = match type_ {
             TypeMarker::Number => parse_element_number(i),
             TypeMarker::Boolean => parse_element_bool(i),
             TypeMarker::String => parse_element_string(i),
-            TypeMarker::Object => {
-                let (i, v) = self.parse_element_object(i)?;
-                self.cache[cache_idx] = Rc::clone(&v);
-                Ok((i, v))
-            }
-            TypeMarker::Null => Ok((i, Rc::new(Value::Null))),
-            TypeMarker::Undefined => Ok((i, Rc::new(Value::Undefined))),
-            TypeMarker::Reference => {
-                let (i, v) = self.parse_element_reference(i)?;
-                Ok((i, v))
-            }
-            TypeMarker::MixedArrayStart => {
-                let (i, v) = self.parse_element_mixed_array(i)?;
-                self.cache[cache_idx] = Rc::clone(&v);
-                Ok((i, v))
-            }
-            TypeMarker::Array => {
-                let (i, v) = self.parse_element_array(i)?;
-                self.cache[cache_idx] = Rc::clone(&v);
-                Ok((i, v))
-            }
-            TypeMarker::Date => parse_element_date(i),
+            TypeMarker::Object => self.parse_element_object(i),
+            TypeMarker::Null => Ok((i, Value::Null)),
+            TypeMarker::Undefined => Ok((i, Value::Undefined)),
+            TypeMarker::Reference => self.parse_element_reference(i),
+            TypeMarker::MixedArrayStart => self.parse_element_mixed_array(i),
+            TypeMarker::Array => self.parse_element_array(i),
+            TypeMarker::Date => self.parse_element_date(i),
             TypeMarker::LongString => parse_element_long_string(i),
-            TypeMarker::Unsupported => Ok((i, Rc::new(Value::Unsupported))),
+            TypeMarker::Unsupported => Ok((i, Value::Unsupported)),
             TypeMarker::Xml => parse_element_xml(i),
-            TypeMarker::TypedObject => {
-                let (i, v) = self.parse_element_typed_object(i)?;
-                self.cache[cache_idx] = Rc::clone(&v);
-                Ok((i, v))
-            }
+            TypeMarker::TypedObject => self.parse_element_typed_object(i),
             TypeMarker::AMF3 => self.parse_element_amf3(i),
             TypeMarker::MovieClip | TypeMarker::RecordSet | TypeMarker::ObjectEnd => Err(
                 Err::Error(crate::errors::Error::UnsupportedType(type_ as u8)),
@@ -249,14 +236,5 @@ impl AMF0Decoder {
     /// Parse a sequence of `PADDING` delimited `Values`
     pub fn parse_body<'a>(&mut self, i: &'a [u8]) -> AMFResult<'a, Vec<Element>> {
         many0(|i| self.parse_element_and_padding(i))(i)
-    }
-
-    /// Convert the given value into a reference, if possible
-    /// This reference is only valid for values sourced from this decoder and will only reference values decoded by it
-    pub fn as_reference(&self, v: &Value) -> Option<Reference> {
-        self.cache
-            .iter()
-            .position(|cv| *cv == Rc::new(v.clone()))
-            .map(|r| Reference(r as _))
     }
 }

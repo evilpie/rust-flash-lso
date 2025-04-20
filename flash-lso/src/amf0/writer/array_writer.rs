@@ -14,13 +14,13 @@ pub struct ArrayWriter<'a, 'b> {
 }
 
 impl<'a, 'b> ObjWriter<'a> for ArrayWriter<'a, 'b> {
-    fn add_element(&mut self, name: &str, s: Value, inc_ref: bool) {
+    fn add_element(&mut self, name: &str, v: Value, inc_ref: bool) {
         if inc_ref {
             self.make_reference();
         }
 
         self.elements
-            .push(Element::new(name.to_string(), Rc::new(s)));
+            .push(Element::new(name.to_string(), v));
     }
 
     fn object<'c: 'a, 'd>(

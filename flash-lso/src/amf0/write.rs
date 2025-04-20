@@ -8,7 +8,6 @@ use crate::nom_utils::write_string;
 use crate::write::WriteExt;
 use std::io::Result;
 use std::ops::Deref;
-use std::rc::Rc;
 
 #[cfg(feature = "amf3")]
 use crate::amf3::write::AMF3Encoder;
@@ -73,7 +72,7 @@ fn write_undefined_element<'a, 'b: 'a, W: Write + 'a>(writer: &mut W) -> Result<
 
 fn write_strict_array_element<'a, 'b: 'a, W: Write + 'a>(
     writer: &mut W,
-    elements: &'b [Rc<Value>],
+    elements: &'b [Value],
 ) -> Result<()> {
     write_type_marker(writer, TypeMarker::Array)?;
     writer.write_u32(elements.len() as u32)?;
@@ -122,7 +121,7 @@ fn write_typed_object_element<'a, 'b: 'a, W: Write + 'a>(
 fn write_dense_element<'a, 'b: 'a, W: Write + 'a>(
     writer: &mut W,
     index: usize,
-    element: &'b Rc<Value>,
+    element: &'b Value,
 ) -> Result<()> {
     let index_str = index.to_string();
 
@@ -135,7 +134,7 @@ fn write_dense_element<'a, 'b: 'a, W: Write + 'a>(
 
 fn write_mixed_array<'a, 'b: 'a, W: Write + 'a>(
     writer: &mut W,
-    dense: &'b [Rc<Value>],
+    dense: &'b [Value],
     elements: &'b [Element],
     length: u32,
 ) -> Result<()> {
@@ -157,9 +156,9 @@ fn write_mixed_array<'a, 'b: 'a, W: Write + 'a>(
 
 pub(crate) fn write_value<'a, 'b: 'a, W: Write + 'a>(
     writer: &mut W,
-    element: &'b Rc<Value>,
+    element: &'b Value,
 ) -> Result<()> {
-    match element.deref() {
+    match element {
         Value::Number(n) => write_number_element(writer, *n),
         Value::Bool(b) => write_bool_element(writer, *b),
         Value::String(s) => {
@@ -179,7 +178,7 @@ pub(crate) fn write_value<'a, 'b: 'a, W: Write + 'a>(
         Value::Null => write_null_element(writer),
         Value::Undefined => write_undefined_element(writer),
         Value::StrictArray(_id, a) => write_strict_array_element(writer, a.as_slice()),
-        Value::Date(d, tz) => write_date_element(writer, *d, *tz),
+        Value::Date(_, d, tz) => write_date_element(writer, *d, *tz),
         Value::Unsupported => write_unsupported_element(writer),
         Value::XML(x, _string) => write_xml_element(writer, x),
         Value::ECMAArray(_id, dense, elems, elems_length) => {

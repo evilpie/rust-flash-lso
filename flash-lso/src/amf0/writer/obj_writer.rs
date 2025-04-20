@@ -1,4 +1,4 @@
-use crate::types::{Reference, Value};
+use crate::types::{ObjectId, Reference, Value};
 
 use super::{ArrayWriter, CacheKey, ObjectWriter};
 
@@ -64,7 +64,8 @@ pub trait ObjWriter<'a> {
 
     /// Write a date
     fn date(&mut self, name: &str, ms: f64, tz: Option<u16>) {
-        self.add_element(name, Value::Date(ms, tz), true)
+        // TODO
+        self.add_element(name, Value::Date(ObjectId::INVALID, ms, tz), true)
     }
 
     /// Write a XML

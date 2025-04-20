@@ -461,6 +461,7 @@ should_fail! {
 }
 
 #[test]
+#[cfg(feature = "amf3")]
 pub fn test_recursive_object() {
     let data = include_bytes!("./amf/self-referential-object.amf");
     let (_, obj) = flash_lso::amf3::read::AMF3Decoder::default()

@@ -26,13 +26,13 @@ pub enum Value {
 
     /// Represent ECMA-Arrays (amf0) and associative arrays (amf3, even if they contain a dense part)
     /// Final value represents the length of the array in amf0, this can differ from the actual number of elements
-    ECMAArray(ObjectId, Vec<Rc<Value>>, Vec<Element>, u32),
+    ECMAArray(ObjectId, Vec<Value>, Vec<Element>, u32),
 
     /// Represent a strict array (amf0) or a dense array (amf3)
-    StrictArray(ObjectId, Vec<Rc<Value>>),
+    StrictArray(ObjectId, Vec<Value>),
 
     /// Represent a timezone in the format (seconds since epoch, timezone or UTC if missing (amf3) )
-    Date(f64, Option<u16>),
+    Date(ObjectId, f64, Option<u16>),
 
     /// Represent the unsupported type
     Unsupported,

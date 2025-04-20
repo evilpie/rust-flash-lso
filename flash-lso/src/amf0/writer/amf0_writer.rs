@@ -23,7 +23,7 @@ impl<'a> ObjWriter<'a> for Amf0Writer {
             self.ref_num += 1;
         }
 
-        self.elements.push(Element::new(name, Rc::new(s)))
+        self.elements.push(Element::new(name, s))
     }
 
     fn object<'c: 'a, 'd>(
